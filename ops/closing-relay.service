@@ -1,0 +1,55 @@
+# /etc/systemd/system/closing-relay.service (installed by ops/setup-host.sh)
+[Unit]
+Description=Closing Tracker relay
+Documentation=https://github.com/Aust1nian/closing-tracker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=closing-relay
+Group=closing-relay
+# Lets the relay hand its admin socket to the operators' group.
+SupplementaryGroups=closing-relay-ops
+ExecStart=/usr/local/bin/closing-relay serve --config /etc/closing-relay/relay.toml
+Restart=on-failure
+RestartSec=2
+Environment=RELAY_LOG=info
+StateDirectory=closing-relay
+StateDirectoryMode=0700
+RuntimeDirectory=closing-relay
+RuntimeDirectoryMode=0755
+UMask=0077
+
+# Sandbox. The relay sees its own state, its config and the network. On a shared
+# machine it can't see anything else: no home directories, no /mnt or /media
+# disks, no website files.
+ProtectSystem=strict
+ProtectHome=yes
+InaccessiblePaths=-/mnt -/media -/srv -/opt
+PrivateTmp=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,9 @@
+# Build output
+relay/target/
+
+# Secrets never go in the repo (spec): Apple keys, certificates, profiles.
+*.p8
+*.p12
+*.mobileprovision
+*.cer
+.env

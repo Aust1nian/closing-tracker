@@ -1,0 +1,24 @@
+# /etc/closing-relay/relay.toml: the Closing Tracker relay's settings.
+# ops/setup-host.sh installs this file once and never overwrites it.
+
+# Public API. Caddy on this host terminates TLS for relay.tightline.systems
+# and forwards here, so the relay itself listens on loopback only.
+listen = "127.0.0.1:8741"
+
+# Database. Must match StateDirectory in closing-relay.service.
+data_dir = "/var/lib/closing-relay"
+
+# relayctl talks to the relay here; members of closing-relay-ops may use it.
+admin_socket = "/run/closing-relay/admin.sock"
+admin_group = "closing-relay-ops"
+
+# The website's /status page reads /v1/health from the browser.
+health_cors_origin = "https://tightline.systems"
+
+# Apple Push Notification service. setup-host.sh fills in key_id when it
+# installs the key. Without this section the relay runs but sends no pushes.
+[apns]
+key_path = "/etc/closing-relay/apns/AuthKey.p8"
+key_id = "APNS_KEY_ID"
+team_id = "J85MUL5KVY"
+topic = "tightline.systems.closingtracker"

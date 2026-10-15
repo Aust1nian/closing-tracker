@@ -1,0 +1,22 @@
+# /etc/caddy/sites.d/closing-relay.caddy (installed by ops/setup-host.sh from the
+# closing-tracker repo). The website's Caddyfile imports /etc/caddy/sites.d/*.caddy.
+#
+# Caddy gets the certificate for relay.tightline.systems itself, once the A record
+# points at this house, and forwards to the relay on loopback. When the relay moves
+# to the Pi, only the reverse_proxy address changes.
+relay.tightline.systems {
+	request_body {
+		max_size 2MB
+	}
+	reverse_proxy 127.0.0.1:8741 {
+		# Long polls on /v1/inbox wait up to 25 s; give them room.
+		transport http {
+			read_timeout 40s
+		}
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		-Server
+	}
+}

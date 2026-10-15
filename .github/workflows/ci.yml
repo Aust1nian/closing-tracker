@@ -1,0 +1,116 @@
+# Every push: relay tests and static builds, app tests, and an unsigned iOS
+# build that proves the Swift side compiles against Apple's current SDK.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: 3.47.7
+  CARGO_TERM_COLOR: always
+
+jobs:
+  relay:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: relay
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install stable --profile minimal --component clippy,rustfmt && rustup default stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: relay
+      - run: cargo fmt --check
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked
+
+  relay-static:
+    # Spec constraint 8: one static binary each for the Pi (aarch64) and a workstation (x86_64).
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: relay
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          rustup toolchain install stable --profile minimal --target x86_64-unknown-linux-musl,aarch64-unknown-linux-musl
+          rustup default stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: relay
+          key: static
+      - name: Install cargo-zigbuild (bundles zig)
+        run: |
+          python3 -m venv "$RUNNER_TEMP/zb"
+          "$RUNNER_TEMP/zb/bin/pip" install --quiet cargo-zigbuild==0.23.4
+          echo "$RUNNER_TEMP/zb/bin" >> "$GITHUB_PATH"
+      - name: Build
+        run: |
+          for t in x86_64-unknown-linux-musl aarch64-unknown-linux-musl; do
+            cargo zigbuild --locked --release --target "$t"
+            for b in closing-relay relayctl; do
+              f="target/$t/release/$b"
+              file "$f"
+              file "$f" | grep -q 'statically linked' || { echo "::error::$f isn't static"; exit 1; }
+            done
+          done
+          ./target/x86_64-unknown-linux-musl/release/closing-relay --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: relay-static
+          retention-days: 7
+          path: |
+            relay/target/x86_64-unknown-linux-musl/release/closing-relay
+            relay/target/x86_64-unknown-linux-musl/release/relayctl
+            relay/target/aarch64-unknown-linux-musl/release/closing-relay
+            relay/target/aarch64-unknown-linux-musl/release/relayctl
+
+  app:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: dart format --output=none --set-exit-if-changed lib test
+      - run: flutter analyze
+      - run: flutter test
+
+  ios-build:
+    needs: app
+    runs-on: macos-26
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select the newest stable Xcode
+        run: |
+          XCODE=$(ls -d /Applications/Xcode_*.app | grep -v -i beta | sort -V | tail -1)
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter build ios --release --no-codesign

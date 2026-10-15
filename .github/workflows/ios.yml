@@ -1,0 +1,79 @@
+# Signed iOS build to TestFlight (spec: GitHub Actions macOS runner, fastlane,
+# App Store Connect API key). Runs once the repository variable TESTFLIGHT is
+# "on", which is set after the secrets below exist:
+#   ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8 (base64 of the .p8), APPLE_TEAM_ID
+name: ios
+
+on:
+  push:
+    branches: [main]
+    paths: ["app/**", ".github/workflows/ios.yml"]
+  workflow_dispatch:
+  schedule:
+    - cron: "0 10 1 * *" # TestFlight builds expire after 90 days
+
+permissions:
+  contents: read
+
+concurrency:
+  group: testflight
+  cancel-in-progress: false
+
+env:
+  FLUTTER_VERSION: 3.47.7
+
+jobs:
+  testflight:
+    if: vars.TESTFLIGHT == 'on'
+    runs-on: macos-26
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: app
+    env:
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select the newest stable Xcode
+        run: |
+          XCODE=$(ls -d /Applications/Xcode_*.app | grep -v -i beta | sort -V | tail -1)
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: Version
+        id: v
+        run: |
+          echo "name=$(sed -n 's/^version: *\([0-9.]*\).*/\1/p' pubspec.yaml)" >> "$GITHUB_OUTPUT"
+          echo "number=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+      - run: flutter pub get
+      - name: Flutter config for Xcode
+        run: >
+          flutter build ios --config-only --release
+          --build-name ${{ steps.v.outputs.name }} --build-number ${{ steps.v.outputs.number }}
+          --dart-define=BUILD_NAME=${{ steps.v.outputs.name }}
+          --dart-define=BUILD_NUMBER=${{ steps.v.outputs.number }}
+      - name: App Store Connect API key
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          mkdir -p ~/private_keys
+          echo "$ASC_KEY_P8" | base64 --decode > ~/private_keys/AuthKey_${ASC_KEY_ID}.p8
+          chmod 600 ~/private_keys/AuthKey_${ASC_KEY_ID}.p8
+      - name: Archive and upload (fastlane beta)
+        working-directory: app/ios
+        run: fastlane beta
+      - name: Build summary
+        if: success()
+        run: echo "TestFlight build ${{ steps.v.outputs.name }} (${{ steps.v.outputs.number }}) uploaded; it appears in TestFlight after Apple processes it." >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: xcode-logs
+          retention-days: 7
+          path: ~/Library/Logs/gym
